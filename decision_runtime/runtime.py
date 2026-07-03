@@ -12,6 +12,9 @@ via the kernel's own executor.
 
 from __future__ import annotations
 
+import logging
+import threading
+from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
@@ -23,6 +26,8 @@ from .scheduler import FifoScheduler, Scheduler
 from .session import Session
 from .state import InMemoryState, StateBackend
 from .supervisor import Supervisor
+
+log = logging.getLogger("decision-runtime")
 
 
 class RuntimeError_(RuntimeError):
@@ -50,6 +55,13 @@ class RuntimeManager:
         self.supervisor = supervisor or Supervisor()
         self.isolation: Isolation = isolation or NoIsolation()
         self._tools = tools
+        # Serialize kernel access: decision-os-min's one-time-token store is not
+        # guaranteed concurrent-safe, so the runtime funnels decisions through one
+        # lock. Correct under concurrency; a throughput ceiling a production build
+        # would lift by sharding or making the core store atomic (see
+        # PRODUCTION_READINESS.md).
+        self._kernel_lock = threading.Lock()
+        self.metrics: Counter[str] = Counter()
 
     @property
     def kernel_public_key(self) -> str:
@@ -64,7 +76,8 @@ class RuntimeManager:
     def submit(self, agent_id: str, action: dict[str, Any]) -> Outcome:
         """Route one action through the kernel. Raises RuntimeError_ only for
         *operational* problems (agent not runnable); a security DENY comes back as
-        an Outcome with executed=False, not an exception."""
+        an Outcome with executed=False, not an exception. A tool that *crashes* is
+        caught and supervised — it never takes the runtime down."""
         session = self.registry.get(agent_id)
         if not session.can_act:
             raise RuntimeError_(f"agent '{agent_id}' cannot act (state={session.state.value})")
@@ -79,7 +92,21 @@ class RuntimeManager:
         wrapped = {
             name: (lambda p, f=fn: self.isolation.run(f, p)) for name, fn in self._tools.items()
         }
-        return self._dos.handle(bound, wrapped)
+        try:
+            with self._kernel_lock:
+                outcome = self._dos.handle(bound, wrapped)
+        except Exception as e:  # a tool raised — contain it, don't crash the runtime
+            disposition = self.supervisor.record_failure(session)
+            self.metrics["FAILED"] += 1
+            log.warning(
+                "tool failure agent=%s err=%s disposition=%s", agent_id, e, disposition
+            )
+            return Outcome(verdict="ERROR", executed=False,
+                           refused_reason=f"tool crashed: {e} (supervisor: {disposition})")
+        self.metrics[outcome.verdict] += 1
+        log.info("decide agent=%s verdict=%s executed=%s", agent_id, outcome.verdict,
+                 outcome.executed)
+        return outcome
 
     def enqueue(self, agent_id: str, action: dict[str, Any]) -> None:
         self.scheduler.enqueue((agent_id, action))

@@ -8,6 +8,7 @@ dropped in — without ever gaining authority.
 
 from __future__ import annotations
 
+import threading
 from collections import deque
 from typing import Any, Protocol, runtime_checkable
 
@@ -20,17 +21,21 @@ class Scheduler(Protocol):
 
 
 class FifoScheduler:
-    """First-in-first-out. Ordering only — no priority that could be abused as an
-    implicit security signal."""
+    """First-in-first-out, thread-safe. Ordering only — no priority that could be
+    abused as an implicit security signal."""
 
     def __init__(self) -> None:
         self._q: deque[Any] = deque()
+        self._lock = threading.Lock()
 
     def enqueue(self, item: Any) -> None:
-        self._q.append(item)
+        with self._lock:
+            self._q.append(item)
 
     def dequeue(self) -> Any | None:
-        return self._q.popleft() if self._q else None
+        with self._lock:
+            return self._q.popleft() if self._q else None
 
     def __len__(self) -> int:
-        return len(self._q)
+        with self._lock:
+            return len(self._q)

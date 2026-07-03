@@ -1,8 +1,12 @@
 # decision-runtime — experimental Agent Runtime Platform (Path B)
 
-**Status: EXPERIMENTAL — a *working, tested* library, but NOT production-grade.**
-It runs single-process, has no real isolation (stub) and no distribution. "Ready"
-means *ready to build on*, not *ready to deploy at scale*.
+**Status: EXPERIMENTAL — production-*hardened* library, NOT production-*ready*
+system.** Hardened in code (thread-safe, crashing tools contained + supervised,
+structured logging + metrics; 22 tests, ruff+mypy clean). But it runs
+single-process, has **no real isolation** (stub — needs an OS-level sandbox), no
+durability, no distribution, and no independent audit. See
+[`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) for exactly what's done and
+what "production-ready" still requires. "Ready" here = *ready to build on*.
 
 This is the **research track (Path B)**. The product priority remains **Path A**
 (`decision-os-min`: stable kernel + SDK + Plugin API + validation) — this track
