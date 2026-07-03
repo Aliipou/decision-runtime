@@ -20,8 +20,13 @@ from typing import Any
 
 from decision_os_min import DecisionOS, Outcome
 
+from .capability import CapabilityRouter
+from .ipc import MessageBus
 from .isolation import Isolation, NoIsolation
+from .memory import ContextMemory
+from .plugin_loader import PluginLoader
 from .registry import AgentRegistry
+from .resources import ResourceManager
 from .scheduler import FifoScheduler, Scheduler
 from .session import Session
 from .state import InMemoryState, StateBackend
@@ -46,6 +51,11 @@ class RuntimeManager:
         supervisor: Supervisor | None = None,
         scheduler: Scheduler | None = None,
         state: StateBackend | None = None,
+        memory: ContextMemory | None = None,
+        bus: MessageBus | None = None,
+        capabilities: CapabilityRouter | None = None,
+        plugins: PluginLoader | None = None,
+        resources: ResourceManager | None = None,
     ) -> None:
         # The kernel (via decision-os-min) is the SOLE authority + the audit truth.
         self._dos = DecisionOS(policy, audit_path=audit_path)
@@ -54,6 +64,13 @@ class RuntimeManager:
         self.state: StateBackend = state or InMemoryState()
         self.supervisor = supervisor or Supervisor()
         self.isolation: Isolation = isolation or NoIsolation()
+        # Platform components — all OPTIONAL, all authority-free. Present them if
+        # you need them; the runtime works without any of them.
+        self.memory = memory
+        self.bus = bus
+        self.capabilities = capabilities
+        self.plugins = plugins
+        self.resources = resources
         self._tools = tools
         # Serialize kernel access: decision-os-min's one-time-token store is not
         # guaranteed concurrent-safe, so the runtime funnels decisions through one
@@ -82,10 +99,20 @@ class RuntimeManager:
         if not session.can_act:
             raise RuntimeError_(f"agent '{agent_id}' cannot act (state={session.state.value})")
 
+        # Resource quota (availability control, NOT authority): refuse over-quota
+        # BEFORE the kernel is ever consulted.
+        if self.resources is not None and not self.resources.allow(agent_id):
+            self.metrics["RATE_LIMITED"] += 1
+            return Outcome(verdict="REFUSED", executed=False,
+                           refused_reason="resource quota exceeded (rate limit)")
+
         # Bind the actor to the SESSION identity — an agent cannot spoof another
         # actor by putting a different 'actor' in its action. Admission binds
         # identity; the kernel still decides authority.
         bound = {**action, "actor": session.actor}
+
+        # Loaded advisor plugins can only TIGHTEN the verdict (advice, not authority).
+        advisor = self.plugins.composed_advisor() if self.plugins is not None else None
 
         # Effects run through the isolation boundary (default: none). The kernel's
         # executor still gates which tool runs, and on what payload.
@@ -94,7 +121,7 @@ class RuntimeManager:
         }
         try:
             with self._kernel_lock:
-                outcome = self._dos.handle(bound, wrapped)
+                outcome = self._dos.handle(bound, wrapped, advisor=advisor)
         except Exception as e:  # a tool raised — contain it, don't crash the runtime
             disposition = self.supervisor.record_failure(session)
             self.metrics["FAILED"] += 1
@@ -103,6 +130,14 @@ class RuntimeManager:
             )
             return Outcome(verdict="ERROR", executed=False,
                            refused_reason=f"tool crashed: {e} (supervisor: {disposition})")
+
+        # Observability side-effects (never authority): remember + record the grant.
+        if self.memory is not None:
+            self.memory.append(agent_id, {"nonce": action.get("nonce"), "verdict": outcome.verdict})
+        if self.capabilities is not None and outcome.verdict in ("ALLOW", "LIMIT"):
+            cap = bound.get("capability") or f"tool:{bound.get('tool', '')}"
+            self.capabilities.record(session.actor, cap, str(action.get("nonce", "")))
+
         self.metrics[outcome.verdict] += 1
         log.info("decide agent=%s verdict=%s executed=%s", agent_id, outcome.verdict,
                  outcome.executed)

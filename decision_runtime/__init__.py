@@ -10,8 +10,13 @@ and distribution are out of scope (see README).
 
 from __future__ import annotations
 
+from .capability import CapabilityRouter, Grant
+from .ipc import Message, MessageBus
 from .isolation import Isolation, NoIsolation, SandboxIsolation
+from .memory import ContextMemory
+from .plugin_loader import Advisor, PluginLoader
 from .registry import AgentRegistry, RegistryError
+from .resources import ResourceManager
 from .runtime import RuntimeError_, RuntimeManager
 from .scheduler import FifoScheduler, Scheduler
 from .session import LifecycleError, Session, State
@@ -34,4 +39,13 @@ __all__ = [
     "Isolation",
     "NoIsolation",
     "SandboxIsolation",
+    # platform components (all authority-free)
+    "ContextMemory",
+    "MessageBus",
+    "Message",
+    "CapabilityRouter",
+    "Grant",
+    "PluginLoader",
+    "Advisor",
+    "ResourceManager",
 ]
