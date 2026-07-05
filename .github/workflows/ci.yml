@@ -1,0 +1,28 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - run: python -m pip install --upgrade pip
+      # decision-os-min is a sibling repo, not on PyPI; install it from git so the
+      # `from decision_os_min import ...` at import time resolves.
+      - run: pip install "decision-os-min @ git+https://github.com/Aliipou/decision-os-min.git"
+      - run: pip install -e ".[dev]"
+      - name: Lint (ruff)
+        run: ruff check decision_runtime tests
+      - name: Types (mypy)
+        run: mypy decision_runtime
+      - name: Tests (pytest)
+        run: pytest -q
+        env:
+          AUTHGATE_BACKEND: python
