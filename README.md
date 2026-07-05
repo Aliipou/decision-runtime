@@ -66,6 +66,11 @@ kernel; the runtime decides only *when* an agent may act, never *whether an acti
 is allowed*. Proven by `tests/test_runtime_authority.py` — a denied action cannot
 be executed via the runtime, and an agent cannot spoof another's identity.
 
+The runtime sits at the **PEP/execute** end of the canonical pipeline (identity
+admission → legitimacy DENY-only → authority grant → **PEP execute + audit**). It
+is downstream of *both* decision layers and, by the invariant above, may neither
+grant authority nor override a denial.
+
 ## Not yet built (the platform's future scope)
 
 Multi-agent coordination, IPC, real isolation, state recovery beyond restart,
