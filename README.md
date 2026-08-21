@@ -1,5 +1,7 @@
 # decision-runtime — experimental Agent Runtime Platform (Path B)
 
+**Live (graph):** [https://ali-decision-runtime.vercel.app](https://ali-decision-runtime.vercel.app)
+
 **Status: EXPERIMENTAL — production-*hardened* library, NOT production-*ready*
 system.** Hardened in code (thread-safe, crashing tools contained + supervised,
 structured logging + metrics; 22 tests, ruff+mypy clean). But it runs
